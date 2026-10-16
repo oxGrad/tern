@@ -148,8 +148,8 @@ range (for example a range that starts on a Saturday) shows no point.
 
 ## Flow metrics
 
-Shown beside the score, never part of it. These read the raw PR tables, so
-the repo filter and the bots toggle both apply.
+Shown beside the score, never part of it. Except for review load, these
+read the raw PR tables, so the repo filter and the bots toggle both apply.
 
 | Metric | Definition |
 | --- | --- |
@@ -158,6 +158,7 @@ the repo filter and the bots toggle both apply.
 | **Median cycle time** (tile) | Median of `merged_at - created_at`, in hours, over PRs merged in the range. Includes any time spent as a draft. |
 | **Median time to first review** (tile) | Median of `first_review_at - created_at`, in hours, over PRs opened in the range that have been reviewed. The first review is the earliest review by anyone other than the author, including a thread reply. |
 | **Size vs cycle time** (PR flow) | One dot per PR merged in the range: size (`additions + deletions`, log scale) against cycle time. The note shows the median size. |
+| **Review load** (member table) | Reviews given ÷ non-draft PRs opened, from the same counts the score uses. Above 1, the member reviews more than they ship; `-` when they opened no PRs. The repo filter does not apply. |
 | **Waiting for review** (PR flow) | Open, non-draft PRs with no review yet, right now, bucketed by age: under 1 day, 1-3 days, 3-7 days, over 7 days. Ignores the date range. |
 
 Each tile compares with the previous period of the same length, the days
@@ -190,8 +191,6 @@ scored.
 - **Late pushes** to the default branch can be missed: GitHub filters
   commits by their own date, so a commit made Monday and pushed Wednesday
   falls before Wednesday's cursor.
-- **Review load** (reviews given ÷ PRs opened), listed in the design doc, is
-  not computed yet. Both inputs are in the member table.
 - **Bot reviews** (for example an AI reviewer) count as a PR's first review,
   so they can shorten time to first review.
 - **People who leave** stop being scored as soon as they're in neither

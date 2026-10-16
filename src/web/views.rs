@@ -238,11 +238,21 @@ pub fn score(conn: &Connection, cfg: &Config, f: &F) -> Result<Section> {
     })
 }
 
+/// Reviews given per PR opened: above 1, a member reviews more than they ship.
+/// `-` when they opened no PRs, since the ratio has no meaning then.
+fn review_load(reviews_given: i64, prs_opened: i64) -> String {
+    if prs_opened == 0 {
+        return "-".into();
+    }
+    format!("{:.2}", reviews_given as f64 / prs_opened as f64)
+}
+
 pub fn member_table(conn: &Connection, cfg: &Config, f: &F) -> Result<Section> {
     let rows = data::rows(conn, cfg, f)?;
     let mut headers = vec!["member".to_string(), "name".into()];
     headers.extend(METRIC_LABEL.iter().map(|s| s.to_lowercase()));
     headers.extend([
+        "review load".into(),
         "lines changed".into(),
         "working days".into(),
         "score".into(),
@@ -254,6 +264,7 @@ pub fn member_table(conn: &Connection, cfg: &Config, f: &F) -> Result<Section> {
             .map(|r| {
                 let mut v = vec![(r.login.clone(), member_link(&r.login, f)), cell(&r.name)];
                 v.extend((0..6).map(|k| cell(r.metric(k))));
+                v.push(cell(review_load(r.sums[3], r.sums[1])));
                 v.push(cell(r.sums[6]));
                 v.push(cell(r.working_days));
                 v.push(cell(match &r.score {
@@ -815,6 +826,13 @@ pub fn feedback_rows(conn: &Connection, f: &F, login: &str) -> Result<Table> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn review_load_is_reviews_per_pr_opened() {
+        assert_eq!(review_load(3, 2), "1.50");
+        assert_eq!(review_load(0, 4), "0.00");
+        assert_eq!(review_load(5, 0), "-");
+    }
 
     #[test]
     fn nice_rounds_up_to_a_step() {

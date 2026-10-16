@@ -629,13 +629,21 @@ mod tests {
         let rows = srv.csv(&format!("/fragments/member-table?{Q}")).await;
         // Bots are hidden by default; names sort case-insensitively.
         assert_eq!(col(&rows, 0), ["ayu", "budi", "gone", "sari"]);
-        let score = |u: &str| rows.iter().find(|r| r[0] == u).unwrap()[10].clone();
+        let cell = |u: &str, i: usize| rows.iter().find(|r| r[0] == u).unwrap()[i].clone();
+        let score = |u: &str| cell(u, 11);
         assert_eq!(score("ayu"), "not scored");
         assert_eq!(score("gone"), "left team");
         assert!(score("budi").parse::<f64>().is_ok() && score("sari").parse::<f64>().is_ok());
         // sari was away one weekday out of twelve.
-        let days = |u: &str| rows.iter().find(|r| r[0] == u).unwrap()[9].clone();
+        let days = |u: &str| cell(u, 10);
         assert_eq!((days("budi"), days("sari")), ("12".into(), "11".into()));
+        // Review load: budi 1 review / 2 PRs, sari 1 / 1 (her draft doesn't
+        // count), gone 0 / 1, ayu opened nothing.
+        let load = |u: &str| cell(u, 8);
+        assert_eq!(
+            [load("budi"), load("sari"), load("gone"), load("ayu")],
+            ["0.50", "1.00", "0.00", "-"]
+        );
 
         let sorted = srv
             .csv(&format!("/fragments/member-table?{Q}&sort=0&dir=desc"))
