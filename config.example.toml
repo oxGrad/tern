@@ -16,7 +16,7 @@
 # [github]
 # Sync is off unless app_id, org and team are all set. The App private key is
 # a secret: keep it in a file outside the repo (chmod 600) and point
-# TERN_GITHUB_KEY_PATH at it.
+# TERN_GITHUB_KEY_PATH at it. See docs/github-setup.md.
 # app_id = 123456
 # org = "your-org"
 # team = "engineering"

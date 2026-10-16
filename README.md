@@ -14,6 +14,8 @@ cargo install --path .
 
 ## Run
 
+First create the GitHub App: [`docs/github-setup.md`](docs/github-setup.md).
+
 ```sh
 tern init                                        # writes config.toml + members.toml
 $EDITOR ~/.config/tern/config.toml ~/.config/tern/members.toml
