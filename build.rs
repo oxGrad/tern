@@ -1,0 +1,43 @@
+fn main() {
+    let sha = std::process::Command::new("git")
+        .args(["rev-parse", "--short", "HEAD"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    let is_tagged = std::process::Command::new("git")
+        .args(["describe", "--exact-match", "--tags", "HEAD"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+
+    // The string `tern --version` / `-V` prints. A plain release built
+    // from a version tag stays just the crate version; anything else (a local
+    // build, a `curl | sh` install off `main`, CI) gets the short SHA appended
+    // so it's obvious exactly which commit is running.
+    let pkg_version = std::env::var("CARGO_PKG_VERSION").unwrap_or_default();
+    let version = if is_tagged || sha == "unknown" {
+        pkg_version
+    } else {
+        format!("{pkg_version} ({sha})")
+    };
+
+    // The exact target triple this binary is built for - `tern
+    // upgrade` uses it to pick the matching release asset
+    // (tern-<triple>.tar.gz). Cargo sets TARGET for build scripts.
+    let target = std::env::var("TARGET").unwrap_or_default();
+
+    println!("cargo:rustc-env=TERN_GIT_SHA={sha}");
+    println!("cargo:rustc-env=TERN_TARGET={target}");
+    println!("cargo:rustc-env=TERN_IS_TAGGED={is_tagged}");
+    println!("cargo:rustc-env=TERN_VERSION={version}");
+    println!("cargo:rerun-if-changed=.git/HEAD");
+    // HEAD is usually `ref: refs/heads/<branch>`: a commit moves the branch
+    // file, not HEAD, so watch the branches too or the SHA goes stale.
+    println!("cargo:rerun-if-changed=.git/refs/heads");
+    println!("cargo:rerun-if-changed=.git/refs/tags");
+}

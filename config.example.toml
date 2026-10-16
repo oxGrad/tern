@@ -1,0 +1,38 @@
+# tern config file.
+#
+# Located by default at $XDG_CONFIG_HOME/tern/config.toml (typically
+# ~/.config/tern/config.toml). Set TERN_CONFIG_PATH to point at a specific
+# file instead.
+#
+# Every key is optional and shown commented-out with its default. Top-level
+# keys must come before any [table] header.
+
+# IANA timezone the dashboard buckets days, weekdays and hours in.
+# timezone = "Asia/Jakarta"
+
+# Defaults to $XDG_DATA_HOME/tern/tern.db. TERN_DB_PATH takes precedence.
+# db_path = "/home/you/.local/share/tern/tern.db"
+
+# [github]
+# Sync is off unless app_id, org and team are all set. The App private key is
+# a secret: keep it in a file outside the repo (chmod 600) and point
+# TERN_GITHUB_KEY_PATH at it.
+# app_id = 123456
+# org = "your-org"
+# team = "engineering"
+# repos = []                   # empty = every non-archived repo the App can see
+# sync_interval_minutes = 15
+
+[server]
+# listen = "127.0.0.1:8088"     # localhost only; the dashboard is never exposed
+
+[score]
+# cap_multiple = 2
+
+[score.weights]
+# prs_merged = 3
+# reviews_given = 3
+# review_comments = 1
+# prs_opened = 1
+# commits = 0.5
+# conv_comments = 0.5

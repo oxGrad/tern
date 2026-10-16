@@ -1,0 +1,16 @@
+# tern team roster.
+#
+# Located by default at $XDG_CONFIG_HOME/tern/members.toml (typically
+# ~/.config/tern/members.toml). Set TERN_MEMBERS_PATH to point at a specific
+# file instead. Seeded into the members table on every start (matched by
+# github_user).
+#
+# in_score = false keeps someone (e.g. the designer) out of the productivity
+# score and the team median, while still showing any activity they have.
+# emails lists commit emails GitHub could not link to the account.
+
+# [[members]]
+# github_user = "someone"
+# name = "Someone"
+# in_score = true
+# emails = ["someone@personal.dev"]

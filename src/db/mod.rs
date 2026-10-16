@@ -1,0 +1,98 @@
+use std::path::Path;
+
+use anyhow::{Context, Result};
+use rusqlite::Connection;
+use rusqlite_migration::{M, Migrations};
+
+fn migrations() -> Migrations<'static> {
+    Migrations::new(vec![
+        M::up(include_str!("migrations/0001_initial.sql")),
+        M::up(include_str!("migrations/0002_member_active.sql")),
+    ])
+}
+
+/// Opens (creating if needed) the SQLite DB at `path`, sets the pragmas and
+/// migrates the schema to the latest version. Safe to call on every startup;
+/// the pragmas must be re-applied per connection anyway.
+pub fn open(path: &Path) -> Result<Connection> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+
+    let mut conn = Connection::open(path)
+        .with_context(|| format!("failed to open database {}", path.display()))?;
+
+    // PRAGMA foreign_keys is per-connection, not persisted by SQLite.
+    conn.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;")
+        .context("failed to set database pragmas")?;
+
+    migrations()
+        .to_latest(&mut conn)
+        .context("failed to run database migrations")?;
+
+    Ok(conn)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn table_names(conn: &Connection) -> Vec<String> {
+        let mut stmt = conn
+            .prepare(
+                "SELECT name FROM sqlite_master
+                 WHERE type = 'table' AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\'
+                 ORDER BY name",
+            )
+            .unwrap();
+        stmt.query_map([], |row| row.get(0))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn fresh_open_creates_all_tables() {
+        let dir = tempfile::tempdir().unwrap();
+        let conn = open(&dir.path().join("tern.db")).unwrap();
+        assert_eq!(
+            table_names(&conn),
+            vec![
+                "away_days",
+                "comments",
+                "commits",
+                "daily_member_stats",
+                "member_emails",
+                "members",
+                "pull_requests",
+                "repos",
+                "reviews",
+                "sync_runs",
+                "sync_state"
+            ]
+        );
+    }
+
+    #[test]
+    fn pragmas_are_set() {
+        let dir = tempfile::tempdir().unwrap();
+        let conn = open(&dir.path().join("tern.db")).unwrap();
+        let fk: i64 = conn
+            .query_row("PRAGMA foreign_keys", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(fk, 1);
+        let mode: String = conn
+            .query_row("PRAGMA journal_mode", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(mode.to_lowercase(), "wal");
+    }
+
+    #[test]
+    fn reopening_is_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tern.db");
+        drop(open(&path).unwrap());
+        assert_eq!(table_names(&open(&path).unwrap()).len(), 11);
+    }
+}

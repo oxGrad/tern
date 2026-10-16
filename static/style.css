@@ -1,0 +1,59 @@
+:root {
+  --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink2: #52514e; --muted: #898781;
+  --line: #e1e0d9; --accent: #2a78d6;
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s6: #008300;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --page: #0d0d0d; --surface: #1a1a19; --ink: #f0efec; --ink2: #c3c2b7; --muted: #898781;
+    --line: #2c2c2a; --accent: #3987e5;
+    --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+a { color: var(--accent); }
+header { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); background: var(--surface); }
+.brand { display: flex; gap: 20px; align-items: baseline; }
+.brand nav { display: flex; gap: 14px; }
+.brand nav a { text-decoration: none; color: var(--ink2); }
+.brand nav a[aria-current] { color: var(--ink); font-weight: 600; }
+.sync { display: flex; gap: 10px; align-items: center; color: var(--muted); font-size: 13px; }
+button, select, input { font: inherit; color: var(--ink); background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 4px 10px; }
+button { cursor: pointer; }
+button:hover { border-color: var(--muted); }
+button[aria-pressed="true"] { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+.htmx-request { opacity: .6; }
+.filters { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.filters label { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--muted); }
+.filters label.check { flex-direction: row; align-items: center; gap: 6px; color: var(--ink2); font-size: 14px; }
+main { max-width: 1280px; margin: 0 auto; padding: 16px; }
+h1 { font-size: 20px; margin: 4px 0 16px; }
+h2 { font-size: 15px; margin: 0; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.tile, .card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+.tile .label { color: var(--ink2); font-size: 13px; }
+.tile .value { font-size: 28px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.tile .delta { color: var(--muted); font-size: 12px; }
+.card { margin-bottom: 16px; }
+.head { display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; align-items: center; }
+.controls { display: flex; flex-wrap: wrap; gap: 4px; }
+.note { color: var(--muted); font-size: 12px; margin: 4px 0 10px; }
+.legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--ink2); margin-bottom: 8px; }
+.sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
+.s1 { background: var(--s1); } .s2 { background: var(--s2); } .s3 { background: var(--s3); }
+.s4 { background: var(--s4); } .s5 { background: var(--s5); } .s6 { background: var(--s6); }
+figure { margin: 0; min-width: 0; }
+figcaption { font-size: 12px; color: var(--ink2); }
+.chart { width: 100%; }
+.multiples { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+.tablebar { display: flex; justify-content: flex-end; gap: 12px; align-items: center; margin: 10px 0 6px; font-size: 12px; }
+.chip { background: var(--page); border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; color: var(--ink2); }
+.tablewrap { overflow-x: auto; max-height: 480px; overflow-y: auto; }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { position: sticky; top: 0; background: var(--surface); }
+th a { color: var(--ink2); text-decoration: none; font-weight: 600; font-size: 12px; }
+th a.sort.asc::after { content: " \25B2"; } th a.sort.desc::after { content: " \25BC"; }
+td.empty { color: var(--muted); text-align: center; }

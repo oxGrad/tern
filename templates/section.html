@@ -1,0 +1,42 @@
+<section id="{{ s.id }}" class="card">
+  <div class="head">
+    <h2>{{ s.title }}</h2>
+    {% if !s.controls.is_empty() %}
+    <div class="controls" role="group">
+      {% for (label, url, on) in s.controls %}<button type="button" hx-get="{{ url }}" hx-target="#{{ s.id }}" hx-swap="outerHTML" {% if *on %}aria-pressed="true"{% endif %}>{{ label }}</button>{% endfor %}
+    </div>
+    {% endif %}
+  </div>
+  <p class="note">{{ s.note }}</p>
+  {% if !s.legend.is_empty() %}
+  <div class="legend">{% for (label, n) in s.legend %}<span><i class="sw s{{ n }}"></i>{{ label }}</span>{% endfor %}</div>
+  {% endif %}
+  {% if !s.charts.is_empty() %}
+  <div class="{% if s.grid %}multiples{% else %}charts{% endif %}">
+    {% for c in s.charts %}
+    <figure>
+      {% if let Some(l) = c.label %}<figcaption>{{ l }}</figcaption>{% endif %}
+      <div class="chart" style="height: {{ c.height }}px" data-chart="{{ c.option }}"{% if let Some(u) = c.click %} data-click="{{ u }}" data-target="{{ c.target }}"{% endif %}></div>
+    </figure>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% if let Some(t) = t %}
+  <div class="tablebar">
+    {% if let Some((value, clear)) = t.filter %}<span class="chip">filtered: {{ value }} <a href="#" hx-get="{{ clear }}" hx-target="#{{ s.id }}" hx-swap="outerHTML">clear</a></span>{% endif %}
+    <a class="csv" href="{{ t.csv }}">Download CSV</a>
+  </div>
+  <div class="tablewrap">
+  <table>
+    <thead><tr>{% for (h, url, mark) in t.headers %}<th><a href="#" hx-get="{{ url }}" hx-target="#{{ s.id }}" hx-swap="outerHTML" class="sort{{ mark }}">{{ h }}</a></th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for row in t.rows %}
+      <tr>{% for (text, link) in row %}<td>{% if let Some(href) = link %}<a href="{{ href }}">{{ text }}</a>{% else %}{{ text }}{% endif %}</td>{% endfor %}</tr>
+    {% endfor %}
+    {% if t.rows.is_empty() %}<tr><td colspan="{{ t.headers.len() }}" class="empty">No rows for this period.</td></tr>{% endif %}
+    {% if let Some(m) = t.more %}<tr><td colspan="{{ t.headers.len() }}"><a href="#" hx-get="{{ m }}" hx-target="#{{ s.id }}" hx-swap="outerHTML">Load more</a></td></tr>{% endif %}
+    </tbody>
+  </table>
+  </div>
+  {% endif %}
+</section>

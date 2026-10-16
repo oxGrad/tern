@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ title }} - tern</title>
+<link rel="stylesheet" href="/static/style.css">
+<script src="/static/vendor/htmx.min.js"></script>
+<script src="/static/vendor/echarts.min.js"></script>
+<script src="/static/charts.js" defer></script>
+</head>
+<body>
+<header>
+  <div class="brand"><strong>tern</strong>
+    <nav>
+      <a href="/?{{ f.qs() }}" {% if nav == "overview" %}aria-current="page"{% endif %}>Team overview</a>
+      <a href="/prs?{{ f.qs() }}" {% if nav == "prs" %}aria-current="page"{% endif %}>PR flow</a>
+    </nav>
+  </div>
+  <div class="sync">
+    <span id="sync-status">{{ last_sync }}</span>
+    {% if sync_enabled %}<button hx-post="/sync" hx-target="#sync-status" hx-indicator="this">Sync now</button>{% endif %}
+  </div>
+</header>
+<form class="filters" method="get" action="{{ path }}">
+  <label>From <input type="date" name="from" value="{{ f.from }}"></label>
+  <label>To <input type="date" name="to" value="{{ f.to }}"></label>
+  <label>Repo
+    <select name="repo">
+      <option value="">All repos</option>
+      {% for r in repos %}<option value="{{ r }}" {% if f.repo.as_deref() == Some(r.as_str()) %}selected{% endif %}>{{ r }}</option>{% endfor %}
+    </select>
+  </label>
+  <label class="check"><input type="checkbox" name="bots" value="1" {% if f.bots %}checked{% endif %}> Include bots</label>
+  <button type="submit">Apply</button>
+</form>
+<main>
+  <h1>{{ title }}</h1>
+  {% if !tiles.is_empty() %}
+  <div class="tiles">
+    {% for t in tiles %}
+    <div class="tile"><div class="label">{{ t.label }}</div><div class="value">{{ t.value }}</div><div class="delta">{{ t.delta }}</div></div>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {{ body|safe }}
+</main>
+</body>
+</html>
