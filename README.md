@@ -15,6 +15,7 @@ cargo install --path .
 ## Run
 
 First create the GitHub App: [`docs/github-setup.md`](docs/github-setup.md).
+How every number and the score are computed: [`docs/metrics.md`](docs/metrics.md).
 
 ```sh
 tern init                                        # writes config.toml + members.toml

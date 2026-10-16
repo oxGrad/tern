@@ -28,6 +28,8 @@
 # listen = "127.0.0.1:8088"     # localhost only; the dashboard is never exposed
 
 [score]
+# Most a member is credited for one metric, as a multiple of the team median.
+# Also sets the ceiling: score max = 50 * cap_multiple. See docs/metrics.md.
 # cap_multiple = 2
 
 [score.weights]
