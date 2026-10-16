@@ -20,7 +20,7 @@ use serde::Deserialize;
 
 use crate::config::Config;
 use data::{F, enc};
-use views::{Section, Tile};
+use views::{Hero, Section};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -67,6 +67,11 @@ struct TableT {
     csv: String,
     filter: Option<(String, String)>,
     more: Option<String>,
+    /// Row count before paging, for the collapsed summary.
+    total: usize,
+    /// Shown expanded: the section asks for it, or the viewer sorted,
+    /// filtered or paged it.
+    open: bool,
 }
 
 #[derive(Template)]
@@ -77,9 +82,17 @@ struct PageT<'a> {
     path: &'a str,
     f: &'a F,
     repos: Vec<String>,
-    last_sync: String,
-    tiles: Vec<Tile>,
+    /// Date-range presets: (label, url, current).
+    ranges: Vec<(String, String, bool)>,
+    /// None of the presets matches: the custom dates are open.
+    custom: bool,
+    /// Extra sub-nav links, e.g. the member switcher: (label, url, current).
+    chips: Vec<(String, String, bool)>,
+    hero: Hero,
     body: String,
+    brief: String,
+    last_sync: String,
+    listen: &'a str,
     sync_enabled: bool,
 }
 
@@ -232,6 +245,11 @@ fn shape(s: &Section, q: &Q) -> Option<TableT> {
             (h.clone(), keep(&format!("&sort={i}&dir={dir}")), mark)
         })
         .collect();
+    let total = rows.len();
+    let open = s.open_table
+        || q.sort.is_some()
+        || q.limit.is_some()
+        || q.filter.as_deref().is_some_and(|f| !f.is_empty());
     let limit = q.limit.unwrap_or(PAGE_ROWS);
     let more = (rows.len() > limit)
         .then(|| sorted(keep(&format!("&limit={}", limit.saturating_add(PAGE_ROWS)))));
@@ -246,6 +264,8 @@ fn shape(s: &Section, q: &Q) -> Option<TableT> {
             .filter(|f| !f.is_empty())
             .map(|f| (f, sorted(s.base.clone()))),
         more,
+        total,
+        open,
     })
 }
 
@@ -329,15 +349,34 @@ async fn fragment(State(st): State<AppState>, Path(name): Path<String>, Query(q)
     }
 }
 
+/// The sub-nav's date-range presets, each ending today.
+fn ranges(path: &str, f: &F) -> Vec<(String, String, bool)> {
+    let today = Utc::now().with_timezone(&f.tz).date_naive();
+    [7, 14, 30, 90]
+        .into_iter()
+        .map(|n| {
+            let from = today - Duration::days(n - 1);
+            let qs = f.with_range(from, today).qs();
+            (
+                format!("{n} days"),
+                format!("{path}?{qs}"),
+                f.to == today && f.from == from,
+            )
+        })
+        .collect()
+}
+
 /// Sections on a full page start unsorted and unfiltered.
 fn page(
     st: &AppState,
     conn: &Connection,
     f: &F,
     (title, nav, path): (&str, &str, &str),
-    tiles: Vec<Tile>,
+    hero: Hero,
+    chips: Vec<(String, String, bool)>,
     sections: Vec<Section>,
 ) -> R {
+    let ranges = ranges(path, f);
     let mut body = String::new();
     for s in &sections {
         body.push_str(&render_section(s, &Q::default())?);
@@ -348,9 +387,14 @@ fn page(
         path,
         f,
         repos: data::repo_names(conn)?,
-        last_sync: data::last_sync(conn, f.tz)?,
-        tiles,
+        custom: !ranges.iter().any(|r| r.2),
+        ranges,
+        chips,
+        hero,
         body,
+        brief: data::sync_brief(conn, f.tz)?,
+        last_sync: data::last_sync(conn, f.tz)?,
+        listen: &st.config.listen,
         sync_enabled: st.config.github.is_some(),
     }
     .render()?;
@@ -361,16 +405,17 @@ async fn overview(State(st): State<AppState>, Query(q): Query<Q>) -> R {
     let conn = st.db.lock().unwrap();
     let f = filters(&conn, &st.config, &q)?;
     let mut sections = vec![];
-    for name in ["score", "member-table", "activity", "mix", "heatmap"] {
+    for name in ["score", "activity", "mix", "heatmap", "member-table"] {
         sections.extend(section_by_name(&conn, &st.config, &f, name, &Q::default())?);
     }
-    let tiles = views::tiles(&conn, &f)?;
+    let hero = views::overview_hero(&conn, &f)?;
     page(
         &st,
         &conn,
         &f,
         ("Team overview", "overview", "/"),
-        tiles,
+        hero,
+        vec![],
         sections,
     )
 }
@@ -379,16 +424,85 @@ async fn prflow(State(st): State<AppState>, Query(q): Query<Q>) -> R {
     let conn = st.db.lock().unwrap();
     let f = filters(&conn, &st.config, &q)?;
     let sections = vec![views::scatter(&conn, &f)?, views::waiting(&conn, &f)?];
-    page(&st, &conn, &f, ("PR flow", "prs", "/prs"), vec![], sections)
+    let hero = views::prflow_hero(&conn, &f)?;
+    page(
+        &st,
+        &conn,
+        &f,
+        ("PR flow", "prs", "/prs"),
+        hero,
+        vec![],
+        sections,
+    )
+}
+
+/// The member page's headline: who they are, their score and rank.
+fn member_hero(
+    conn: &Connection,
+    config: &Config,
+    f: &F,
+    m: &data::Member,
+) -> anyhow::Result<Hero> {
+    let rows = data::rows(conn, config, f)?;
+    let mut scored: Vec<&data::Row> = rows.iter().filter(|r| r.score.is_some()).collect();
+    scored.sort_by(|a, b| {
+        let t = |r: &data::Row| r.score.as_ref().map_or(0.0, |s| s.total);
+        t(b).total_cmp(&t(a))
+    });
+    let row = rows.iter().find(|r| r.login == m.login);
+    let weekdays = crate::score::weekdays(f.from, f.to).len();
+    let status = if m.is_bot {
+        "bot"
+    } else if !m.active {
+        "left the team"
+    } else if !m.in_score {
+        "not scored"
+    } else {
+        "in score"
+    };
+    let days = row.map_or(0, |r| r.working_days as usize);
+    let away = weekdays.saturating_sub(days);
+    let lead = format!(
+        "@{} · {status} · {days} of {weekdays} working days{}",
+        m.login,
+        if away > 0 {
+            format!(", {away} away")
+        } else {
+            String::new()
+        }
+    );
+    let (big, big_note) = match row.and_then(|r| r.score.as_ref()) {
+        Some(s) => {
+            let rank = scored.iter().position(|r| r.login == m.login).unwrap_or(0) + 1;
+            (
+                format!("{:.1}", s.total),
+                format!("#{rank} of {} this period. Typical is 50.", scored.len()),
+            )
+        }
+        None => ("n/a".into(), "No score this period.".into()),
+    };
+    Ok(Hero {
+        eyebrow: views::eyebrow(f),
+        title: m.name.clone(),
+        lead,
+        avatar: m
+            .name
+            .chars()
+            .next()
+            .unwrap_or('?')
+            .to_uppercase()
+            .collect(),
+        big,
+        big_note,
+        ..Hero::default()
+    })
 }
 
 async fn member(State(st): State<AppState>, Path(login): Path<String>, Query(q): Query<Q>) -> R {
     let conn = st.db.lock().unwrap();
     let f = filters(&conn, &st.config, &q)?;
-    let Some(m) = data::members(&conn, true)?
-        .into_iter()
-        .find(|m| m.login == login)
-    else {
+    let all = data::members(&conn, true)?;
+    let Some(m) = all.iter().find(|m| m.login == login) else {
         return Ok((
             StatusCode::NOT_FOUND,
             format!("{login} is not in members.toml or the team"),
@@ -403,14 +517,15 @@ async fn member(State(st): State<AppState>, Path(login): Path<String>, Query(q):
         "member-heatmap",
         base("member-heatmap"),
     )?;
-    heat.title = "Personal heatmap".into();
+    heat.title = "Working rhythm".into();
     heat.note = format!(
-        "Their PR, review and comment events by weekday and hour ({}). The table lists their reviews and comments, newest first.",
+        "Their PRs, reviews and comments by weekday and hour, {}. The table lists their reviews and comments, newest first.",
         f.tz
     );
     heat.charts[0].click = None;
     heat.table = Some(views::feedback_rows(&conn, &f, &login)?);
     let sections = vec![
+        views::breakdown(&conn, &st.config, &f, &login, base("breakdown"))?,
         views::trend(&conn, &st.config, &f, &login, base("trend"))?,
         views::member_mix(&conn, &f, &login, base("member-mix"))?,
         heat,
@@ -421,13 +536,26 @@ async fn member(State(st): State<AppState>, Path(login): Path<String>, Query(q):
             None => Ok((StatusCode::NOT_FOUND, "no such section").into_response()),
         };
     }
-    let title = format!("{} ({})", m.name, m.login);
+    let chips = all
+        .iter()
+        .filter(|o| (o.active && !o.is_bot) || o.login == m.login)
+        .map(|o| {
+            (
+                o.name.clone(),
+                format!("/members/{}?{}", enc(&o.login), f.qs()),
+                o.login == m.login,
+            )
+        })
+        .collect();
+    let hero = member_hero(&conn, &st.config, &f, m)?;
+    let path = format!("/members/{}", enc(&login));
     page(
         &st,
         &conn,
         &f,
-        (&title, "member", &format!("/members/{}", enc(&login))),
-        vec![],
+        (&m.name, "member", &path),
+        hero,
+        chips,
         sections,
     )
 }
@@ -579,34 +707,55 @@ mod tests {
         assert_eq!(status, 200);
         for want in [
             "Team overview",
-            "PRs merged",
-            "Median cycle time (h)",
-            "Score by member",
-            "Members",
-            "Activity over time",
-            "Activity by type",
+            // Hero: 3 merged in range, none in the 16 days before.
+            "3 PRs merged. 2 reviews given.",
+            "3 more merges than the 16 days before",
+            "Median cycle time",
+            // Bands in their tones, the score as ranked rows.
+            "class=\"band band-parchment\"",
+            "class=\"band band-dark\"",
+            "Productivity score",
+            "Not scored: in_score = false",
+            "Left the team",
+            "Activity",
+            "By type",
             "When work happens",
+            "Members",
+            // Range presets and the footer.
+            "14 days",
+            "90 days",
             "last sync: ok - 2026-10-16 14:15, 23 requests",
             "data-chart=",
         ] {
             assert!(body.contains(want), "overview lacks {want:?}");
         }
+        // Score rows filter the members table instead of drawing a chart.
+        assert!(
+            body.contains("filter=budi\" hx-target=\"#member-table\""),
+            "score rows must filter the members table"
+        );
         // No GitHub configured: no Sync now button.
         assert!(!body.contains("hx-post=\"/sync\""));
 
         let (status, body) = srv.get(&format!("/prs?{Q}")).await;
         assert_eq!(status, 200);
-        assert!(body.contains("Size vs cycle time") && body.contains("Waiting for review"));
+        assert!(body.contains("Do big PRs slow down?") && body.contains("Waiting for review"));
 
         let (status, body) = srv.get(&format!("/members/budi?{Q}")).await;
         assert_eq!(status, 200);
         for want in [
-            "Budi (budi)",
+            "<h1 id=\"hero-h\">Budi</h1>",
+            "@budi · in score · 12 of 12 working days",
+            "this period. Typical is 50.",
+            "Where the ",
+            "× the median of ",
             "Score trend",
-            "Activity mix",
-            "Personal heatmap",
+            "Shipping vs reviewing",
+            "Working rhythm",
             "Big change",
             "changes_requested",
+            // The member switcher marks the current member.
+            "aria-current=\"page\">Budi</a>",
         ] {
             assert!(body.contains(want), "member page lacks {want:?}");
         }
@@ -617,6 +766,17 @@ mod tests {
         assert_eq!(
             srv.get(&format!("/members/budi?{Q}&section=nope")).await.0,
             404
+        );
+        // Ayu opted out: no breakdown, and the reason instead.
+        let (_, body) = srv
+            .get(&format!("/members/ayu?{Q}&section=breakdown"))
+            .await;
+        assert!(body.contains("No score this period") && body.contains("in_score is false"));
+
+        let (_, body) = srv.get(&format!("/prs?{Q}")).await;
+        assert!(
+            body.contains("hours from open to merge.") && body.contains("1 PR</p>"),
+            "{body}"
         );
         assert_eq!(srv.get("/members/nobody").await.0, 404);
         // Out-of-range dates fall back to the default range instead of panicking.
@@ -664,7 +824,7 @@ mod tests {
             ))
             .await;
         assert_eq!(status, 200);
-        assert!(html.contains("filtered: budi") && html.contains("class=\"sort asc\""));
+        assert!(html.contains("Filtered: budi") && html.contains("class=\"sort asc\""));
     }
 
     #[tokio::test]
@@ -676,6 +836,28 @@ mod tests {
             assert!(body.starts_with("<section"), "{frag}");
         }
         assert_eq!(srv.get(&format!("/fragments/nope?{Q}")).await.0, 404);
+        // Rows behind a chart start collapsed; the members table and any
+        // sorted or filtered table start open.
+        let collapsed = "<details class=\"card table-card\">";
+        let open = "<details class=\"card table-card\" open>";
+        assert!(
+            srv.get(&format!("/fragments/activity?{Q}"))
+                .await
+                .1
+                .contains(collapsed)
+        );
+        assert!(
+            srv.get(&format!("/fragments/activity?{Q}&sort=2&dir=desc"))
+                .await
+                .1
+                .contains(open)
+        );
+        assert!(
+            srv.get(&format!("/fragments/member-table?{Q}"))
+                .await
+                .1
+                .contains(open)
+        );
         // The score chart has no table to export.
         assert_eq!(
             srv.get(&format!("/fragments/score?{Q}&format=csv")).await.0,

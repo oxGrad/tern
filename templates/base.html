@@ -3,47 +3,106 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{ title }} - tern</title>
+<title>{{ title }} · tern</title>
 <link rel="stylesheet" href="/static/style.css">
 <script src="/static/vendor/htmx.min.js"></script>
 <script src="/static/vendor/echarts.min.js"></script>
 <script src="/static/charts.js" defer></script>
 </head>
 <body>
-<header>
-  <div class="brand"><strong>tern</strong>
-    <nav>
-      <a href="/?{{ f.qs() }}" {% if nav == "overview" %}aria-current="page"{% endif %}>Team overview</a>
-      <a href="/prs?{{ f.qs() }}" {% if nav == "prs" %}aria-current="page"{% endif %}>PR flow</a>
-    </nav>
+<nav class="gnav" aria-label="Global">
+  <div class="wrap gnav-row">
+    <a class="gnav-brand" href="/?{{ f.qs() }}" aria-label="tern, team overview">
+      <svg width="22" height="22" viewBox="0 0 28 28" aria-hidden="true"><path d="M3 15 C 9 9, 12 9, 14 14 C 16 9, 19 9, 25 15" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/><circle cx="14" cy="17.5" r="1.6" fill="currentColor"/></svg>
+      <span>tern</span>
+    </a>
+    <a href="/?{{ f.qs() }}" {% if nav == "overview" %}aria-current="page"{% endif %}>Overview</a>
+    <a href="/prs?{{ f.qs() }}" {% if nav == "prs" %}aria-current="page"{% endif %}>PR flow</a>
+    <a href="/?{{ f.qs() }}#member-table" {% if nav == "member" %}aria-current="page"{% endif %}>Members</a>
+    <span id="sync-status" class="gnav-status" role="status">{{ brief }}</span>
   </div>
-  <div class="sync">
-    <span id="sync-status">{{ last_sync }}</span>
-    {% if sync_enabled %}<button hx-post="/sync" hx-target="#sync-status" hx-indicator="this">Sync now</button>{% endif %}
+</nav>
+
+<div class="subnav">
+  <div class="wrap subnav-row">
+    <span class="subnav-title">{{ title }}</span>
+    {% if !chips.is_empty() %}
+    <div class="chips" role="group" aria-label="Member">
+      {% for (label, url, on) in chips %}<a class="chip" href="{{ url }}"{% if *on %} aria-current="page"{% endif %}>{{ label }}</a>{% endfor %}
+    </div>
+    {% endif %}
+    <form class="filters" method="get" action="{{ path }}" aria-label="Filters">
+      <div class="chips" role="group" aria-label="Date range">
+        {% for (label, url, on) in ranges %}<a class="chip" href="{{ url }}"{% if *on %} aria-current="true"{% endif %}>{{ label }}</a>{% endfor %}
+      </div>
+      <details class="custom"{% if custom %} open{% endif %}>
+        <summary class="chip"{% if custom %} aria-current="true"{% endif %}>Custom</summary>
+        <div class="custom-fields">
+          <label class="field">From <input type="date" name="from" value="{{ f.from }}"></label>
+          <label class="field">To <input type="date" name="to" value="{{ f.to }}"></label>
+          <button class="btn-ghost" type="submit">Apply</button>
+        </div>
+      </details>
+      {% if nav != "member" %}
+      <label class="field">Repo
+        <select name="repo" onchange="this.form.requestSubmit()">
+          <option value="">All repos</option>
+          {% for r in repos %}<option value="{{ r }}" {% if f.repo.as_deref() == Some(r.as_str()) %}selected{% endif %}>{{ r }}</option>{% endfor %}
+        </select>
+      </label>
+      {% endif %}
+      <label class="field check"><input type="checkbox" name="bots" value="1" {% if f.bots %}checked{% endif %} onchange="this.form.requestSubmit()"> Include bots</label>
+    </form>
+    {% if sync_enabled %}<button class="btn-primary" type="button" hx-post="/sync" hx-target="#sync-status" hx-indicator="this">Sync now</button>{% endif %}
   </div>
-</header>
-<form class="filters" method="get" action="{{ path }}">
-  <label>From <input type="date" name="from" value="{{ f.from }}"></label>
-  <label>To <input type="date" name="to" value="{{ f.to }}"></label>
-  <label>Repo
-    <select name="repo">
-      <option value="">All repos</option>
-      {% for r in repos %}<option value="{{ r }}" {% if f.repo.as_deref() == Some(r.as_str()) %}selected{% endif %}>{{ r }}</option>{% endfor %}
-    </select>
-  </label>
-  <label class="check"><input type="checkbox" name="bots" value="1" {% if f.bots %}checked{% endif %}> Include bots</label>
-  <button type="submit">Apply</button>
-</form>
+</div>
+
 <main>
-  <h1>{{ title }}</h1>
-  {% if !tiles.is_empty() %}
-  <div class="tiles">
-    {% for t in tiles %}
-    <div class="tile"><div class="label">{{ t.label }}</div><div class="value">{{ t.value }}</div><div class="delta">{{ t.delta }}</div></div>
-    {% endfor %}
-  </div>
-  {% endif %}
+  <section class="band band-white hero" aria-labelledby="hero-h">
+    <div class="wrap">
+      {% if !hero.avatar.is_empty() %}
+      <div class="hero-member">
+        <div class="hero-who">
+          <span class="avatar" aria-hidden="true">{{ hero.avatar }}</span>
+          <div>
+            <p class="eyebrow">{{ hero.eyebrow }}</p>
+            <h1 id="hero-h">{{ hero.title }}</h1>
+            <p class="hero-sub">{{ hero.lead }}</p>
+          </div>
+        </div>
+        <div class="hero-score">
+          <span class="tn">{{ hero.big }}</span>
+          <span class="hero-sub">{{ hero.big_note }}</span>
+        </div>
+      </div>
+      {% else %}
+      <div class="hero-text">
+        <p class="eyebrow">{{ hero.eyebrow }}</p>
+        <h1 id="hero-h">{{ hero.title }}</h1>
+        <p class="lead">{{ hero.lead }}</p>
+      </div>
+      {% endif %}
+      {% if !hero.tiles.is_empty() %}
+      <div class="kpis">
+        {% for t in hero.tiles %}
+        <div class="kpi">
+          <span class="kpi-label">{{ t.label }}</span>
+          <span class="kpi-value tn">{{ t.value }}<span class="kpi-unit">{{ t.unit }}</span></span>
+          <span class="kpi-note">{% if !t.delta.is_empty() %}<strong class="tn">{{ t.delta }}</strong> {% endif %}{{ t.note }}</span>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+  </section>
   {{ body|safe }}
 </main>
+
+<footer class="footer">
+  <div class="wrap footer-row">
+    <span class="tn">{{ last_sync }}</span>
+    <span>Served on {{ listen }} · local only</span>
+  </div>
+</footer>
 </body>
 </html>

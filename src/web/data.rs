@@ -124,6 +124,33 @@ pub fn repo_names(conn: &Connection) -> Result<Vec<String>> {
         .collect::<rusqlite::Result<_>>()?)
 }
 
+/// The top bar's sync status: "Synced 14:15", "Sync partial Oct 15 09:00", ...
+pub fn sync_brief(conn: &Connection, tz: Tz) -> Result<String> {
+    let row: Option<(String, Option<String>)> = conn
+        .query_row(
+            "SELECT started_at, status FROM sync_runs ORDER BY id DESC LIMIT 1",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .optional()?;
+    let Some((at, status)) = row else {
+        return Ok("Never synced".into());
+    };
+    let when = parse_utc(&at).map_or_else(String::new, |d| {
+        let d = d.with_timezone(&tz);
+        if d.date_naive() == Utc::now().with_timezone(&tz).date_naive() {
+            d.format("%H:%M").to_string()
+        } else {
+            d.format("%b %-d %H:%M").to_string()
+        }
+    });
+    Ok(match status.as_deref() {
+        Some("ok") => format!("Synced {when}"),
+        Some(s) => format!("Sync {s} {when}"),
+        None => format!("Syncing since {when}"),
+    })
+}
+
 pub fn last_sync(conn: &Connection, tz: Tz) -> Result<String> {
     Ok(format!("last sync: {}", crate::status::last_run(conn, tz)?))
 }

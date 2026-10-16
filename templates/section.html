@@ -1,42 +1,121 @@
-<section id="{{ s.id }}" class="card">
-  <div class="head">
-    <h2>{{ s.title }}</h2>
-    {% if !s.controls.is_empty() %}
-    <div class="controls" role="group">
-      {% for (label, url, on) in s.controls %}<button type="button" hx-get="{{ url }}" hx-target="#{{ s.id }}" hx-swap="outerHTML" {% if *on %}aria-pressed="true"{% endif %}>{{ label }}</button>{% endfor %}
+<section id="{{ s.id }}" class="band band-{{ s.tone }}{% if s.tight %} band-tight{% endif %}"{% if !s.title.is_empty() %} aria-labelledby="{{ s.id }}-h"{% else %} aria-label="{{ s.card_title }}"{% endif %}>
+  <div class="wrap band-body">
+    {% if !s.title.is_empty() %}
+    <header class="band-head">
+      <div class="band-intro">
+        <h2 id="{{ s.id }}-h">{{ s.title }}</h2>
+        {% if !s.note.is_empty() %}<p>{{ s.note }}</p>{% endif %}
+      </div>
+      {% if !s.controls.is_empty() %}
+      <div class="chips" role="group" aria-label="{{ s.title }} type">
+        {% for (label, url, on) in s.controls %}<button class="chip" type="button" hx-get="{{ url }}" hx-target="#{{ s.id }}" hx-swap="outerHTML" {% if *on %}aria-pressed="true"{% endif %}>{{ label }}</button>{% endfor %}
+      </div>
+      {% endif %}
+    </header>
+    {% endif %}
+
+    {% if !s.big.is_empty() %}<p class="big tn">{{ s.big }}</p>{% endif %}
+
+    {% if !s.aging.is_empty() %}
+    <div class="aging" role="img" aria-label="Waiting PRs by age">
+      {% for a in s.aging %}{% if a.count > 0 %}<span class="age{{ a.step }}" style="flex: {{ a.count }} 1 0">{{ a.count }}</span>{% endif %}{% endfor %}
+    </div>
+    <div class="legend">
+      {% for a in s.aging %}<span><i class="dot age{{ a.step }}"></i>{{ a.label }} <strong class="tn">{{ a.count }}</strong></span>{% endfor %}
     </div>
     {% endif %}
+
+    {% if !s.score_rows.is_empty() %}
+    <div class="card card-pad">
+      <div class="legend">
+        {% for (label, n) in s.legend %}<span><i class="dot s{{ n }}"></i>{{ label }}</span>{% endfor %}
+      </div>
+      <div class="score-list">
+        <div class="score-row score-scale" aria-hidden="true">
+          <span></span><span></span>
+          <span class="scale tn"><span>0</span><span class="scale-mid" style="left: {{ s.mid }}%">50 median</span><span>{{ s.scale_max }}</span></span>
+          <span></span>
+        </div>
+        {% for r in s.score_rows %}
+        <div class="score-row">
+          <span class="rank tn">{{ r.rank }}</span>
+          <a class="who" href="{{ r.href }}"><strong>{{ r.name }}</strong><span>@{{ r.login }}</span></a>
+          {% if r.why.is_empty() %}
+          <button class="bar" type="button" hx-get="{{ r.filter }}" hx-target="#member-table" hx-swap="outerHTML" aria-label="Filter the members table to {{ r.name }}">
+            <span class="bar-fill">{% for (w, n) in r.segs %}<span class="s{{ n }}" style="width: {{ w }}%"></span>{% endfor %}</span>
+            <span class="bar-mid" style="left: {{ s.mid }}%"></span>
+          </button>
+          {% else %}
+          <span class="why">{{ r.why }}</span>
+          {% endif %}
+          <span class="score tn">{{ r.score }}</span>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    {% if !s.parts.is_empty() %}
+    <div class="bar bar-static" role="img" aria-label="Score breakdown">
+      <span class="bar-fill">{% for p in s.parts %}<span class="s{{ p.slot }}" style="width: {{ p.width }}%"></span>{% endfor %}</span>
+      <span class="bar-mid" style="left: {{ s.mid }}%"></span>
+    </div>
+    <div class="parts">
+      {% for p in s.parts %}
+      <div class="card part">
+        <span class="part-label"><i class="dot s{{ p.slot }}"></i>{{ p.label }}</span>
+        <span class="part-nums"><span class="part-count tn">{{ p.count }}</span><strong class="tn">{{ p.points }} pts</strong></span>
+        <span class="meter"><span class="s{{ p.slot }}" style="width: {{ p.fill }}%"></span><span class="meter-mid" style="left: {{ s.mid }}%"></span></span>
+        <span class="part-note tn">{{ p.ratio }}× the median of {{ p.median }} · weight {{ p.weight }}</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if !s.charts.is_empty() %}
+    <div class="card card-pad">
+      {% if !s.card_title.is_empty() %}
+      <div class="card-head">
+        <h3>{{ s.card_title }}</h3>
+        {% if s.title.is_empty() && !s.note.is_empty() %}<p>{{ s.note }}</p>{% endif %}
+      </div>
+      {% endif %}
+      {% if s.score_rows.is_empty() && !s.legend.is_empty() %}
+      <div class="legend">
+        {% for (label, n) in s.legend %}<span><i class="dot s{{ n }}"></i>{{ label }}</span>{% endfor %}
+      </div>
+      {% endif %}
+      <div class="{% if s.grid %}multiples{% else %}charts{% endif %}">
+        {% for c in s.charts %}
+        <figure>
+          {% if let Some(l) = c.label %}<figcaption>{{ l }}</figcaption>{% endif %}
+          <div class="chart" style="height: {{ c.height }}px" data-chart="{{ c.option }}"{% if let Some(u) = c.click %} data-click="{{ u }}" data-target="{{ c.target }}"{% endif %}></div>
+        </figure>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    {% if let Some(t) = t %}
+    <details class="card table-card"{% if t.open %} open{% endif %}>
+      <summary class="table-toggle"><span>Rows behind this {% if s.charts.is_empty() && s.score_rows.is_empty() && s.aging.is_empty() %}section{% else %}chart{% endif %}</span> <span class="tn">{{ t.total }}</span></summary>
+      <div class="tablebar">
+        {% if let Some((value, clear)) = t.filter %}<span class="chip chip-static">Filtered: {{ value }} <a href="#" hx-get="{{ clear }}" hx-target="#{{ s.id }}" hx-swap="outerHTML">Clear</a></span>{% endif %}
+        <a class="btn-ghost" href="{{ t.csv }}">Export CSV</a>
+      </div>
+      <div class="tablewrap">
+        <table>
+          <thead><tr>{% for (h, url, mark) in t.headers %}<th><a href="#" hx-get="{{ url }}" hx-target="#{{ s.id }}" hx-swap="outerHTML" class="sort{{ mark }}">{{ h }}</a></th>{% endfor %}</tr></thead>
+          <tbody>
+          {% for row in t.rows %}
+            <tr>{% for (text, link) in row %}<td>{% if let Some(href) = link %}<a href="{{ href }}">{{ text }}</a>{% else %}{{ text }}{% endif %}</td>{% endfor %}</tr>
+          {% endfor %}
+          {% if t.rows.is_empty() %}<tr><td colspan="{{ t.headers.len() }}" class="empty">No rows for this period.</td></tr>{% endif %}
+          </tbody>
+        </table>
+      </div>
+      {% if let Some(m) = t.more %}<div class="more"><button class="btn-ghost" type="button" hx-get="{{ m }}" hx-target="#{{ s.id }}" hx-swap="outerHTML">Load more</button></div>{% endif %}
+    </details>
+    {% endif %}
   </div>
-  <p class="note">{{ s.note }}</p>
-  {% if !s.legend.is_empty() %}
-  <div class="legend">{% for (label, n) in s.legend %}<span><i class="sw s{{ n }}"></i>{{ label }}</span>{% endfor %}</div>
-  {% endif %}
-  {% if !s.charts.is_empty() %}
-  <div class="{% if s.grid %}multiples{% else %}charts{% endif %}">
-    {% for c in s.charts %}
-    <figure>
-      {% if let Some(l) = c.label %}<figcaption>{{ l }}</figcaption>{% endif %}
-      <div class="chart" style="height: {{ c.height }}px" data-chart="{{ c.option }}"{% if let Some(u) = c.click %} data-click="{{ u }}" data-target="{{ c.target }}"{% endif %}></div>
-    </figure>
-    {% endfor %}
-  </div>
-  {% endif %}
-  {% if let Some(t) = t %}
-  <div class="tablebar">
-    {% if let Some((value, clear)) = t.filter %}<span class="chip">filtered: {{ value }} <a href="#" hx-get="{{ clear }}" hx-target="#{{ s.id }}" hx-swap="outerHTML">clear</a></span>{% endif %}
-    <a class="csv" href="{{ t.csv }}">Download CSV</a>
-  </div>
-  <div class="tablewrap">
-  <table>
-    <thead><tr>{% for (h, url, mark) in t.headers %}<th><a href="#" hx-get="{{ url }}" hx-target="#{{ s.id }}" hx-swap="outerHTML" class="sort{{ mark }}">{{ h }}</a></th>{% endfor %}</tr></thead>
-    <tbody>
-    {% for row in t.rows %}
-      <tr>{% for (text, link) in row %}<td>{% if let Some(href) = link %}<a href="{{ href }}">{{ text }}</a>{% else %}{{ text }}{% endif %}</td>{% endfor %}</tr>
-    {% endfor %}
-    {% if t.rows.is_empty() %}<tr><td colspan="{{ t.headers.len() }}" class="empty">No rows for this period.</td></tr>{% endif %}
-    {% if let Some(m) = t.more %}<tr><td colspan="{{ t.headers.len() }}"><a href="#" hx-get="{{ m }}" hx-target="#{{ s.id }}" hx-swap="outerHTML">Load more</a></td></tr>{% endif %}
-    </tbody>
-  </table>
-  </div>
-  {% endif %}
 </section>

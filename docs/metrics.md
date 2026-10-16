@@ -141,10 +141,19 @@ If B had been away for 2 of the 10 days, B's 4 PRs would be adjusted to
 
 ### Score trend (member page)
 
-The same calculation run once per calendar week (Monday to Sunday, clipped to
-the selected range), against that week's team median. The dashed line at 50
-is the median; the shaded band is 40-60. A week with no working days in the
-range (for example a range that starts on a Saturday) shows no point.
+The same calculation run once per calendar week (Monday to Sunday) for the
+**last 12 weeks ending with the selected range**, each against that week's
+team median; the last week is clipped at the range's end. The selected range
+is shaded, the dashed line at 50 is the median and the band is 40-60. The
+"Shipping vs reviewing" chart beside it covers the same 12 weeks, with weeks
+before the range faded. A week with no working days shows no point.
+
+### Breakdown (member page)
+
+"Where the score comes from" shows, for each of the six metrics, the raw
+count, the points it earned, and the ratio to the team median *before* the
+cap (so 3.1× is shown as 3.1×, even though it earns only 2×'s points). The
+meter runs from 0 to `cap_multiple`, with a marker at 1× (the median).
 
 ## Flow metrics
 
@@ -157,7 +166,7 @@ read the raw PR tables, so the repo filter and the bots toggle both apply.
 | **Reviews** (tile) | Reviews submitted in the range, per the counting rules above. |
 | **Median cycle time** (tile) | Median of `merged_at - created_at`, in hours, over PRs merged in the range. Includes any time spent as a draft. |
 | **Median time to first review** (tile) | Median of `first_review_at - created_at`, in hours, over PRs opened in the range that have been reviewed. The first review is the earliest review by anyone other than the author, including a thread reply. |
-| **Size vs cycle time** (PR flow) | One dot per PR merged in the range: size (`additions + deletions`, log scale) against cycle time. The note shows the median size. |
+| **Size vs cycle time** (PR flow) | One dot per PR merged in the range: size (`additions + deletions`, log scale; a PR with no changed lines sits at 1) against cycle time. Dashed lines mark the median size and median cycle time; the shaded corner beyond both holds the big and slow PRs. |
 | **Review load** (member table) | Reviews given ÷ non-draft PRs opened, from the same counts the score uses. Above 1, the member reviews more than they ship; `-` when they opened no PRs. The repo filter does not apply. |
 | **Waiting for review** (PR flow) | Open, non-draft PRs with no review yet, right now, bucketed by age: under 1 day, 1-3 days, 3-7 days, over 7 days. Ignores the date range. |
 
@@ -169,7 +178,8 @@ just before the selected range.
 These count individual events from raw activity (the `activity` view), so
 the repo filter applies.
 
-- **Activity over time**: events per member per calendar week. The type
+- **Activity over time**: events per member per day for ranges up to 31
+  days (weekends shaded), per calendar week for longer ones. The type
   selector narrows it to commits, PRs (opened + merged), reviews, or comments
   (review + conversation).
 - **Activity by type**: one stacked chart per member, a segment per event
@@ -177,7 +187,7 @@ the repo filter applies.
 - **When work happens**: events by weekday and hour. **Commits are left
   out**: their time comes from the author's machine and changes on rebase.
   PR, review and comment times are recorded by GitHub. Core hours (09-12 and
-  16-18) are named in the note.
+  16-18) are outlined.
 
 Unlike the score, these count draft PRs when they're opened, and count
 inline comments on a member's own PR. They show what happened, not what is

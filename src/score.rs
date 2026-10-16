@@ -29,6 +29,10 @@ pub struct Scored {
     /// Points each metric contributes; they sum to `total`.
     pub parts: [f64; 6],
     pub total: f64,
+    /// Adjusted count ÷ team median, before the cap.
+    pub ratios: [f64; 6],
+    /// The team medians this member was measured against (floored at 1).
+    pub medians: [f64; 6],
 }
 
 /// Mon-Fri dates in `from..=to`.
@@ -66,13 +70,11 @@ pub fn score(inputs: &[Input], period_days: u32, cfg: &ScoreConfig) -> Vec<Score
             (i.user.as_str(), i.counts.map(|c| c * f))
         })
         .collect();
-    let medians: Vec<f64> = (0..6)
-        .map(|k| {
-            median(adjusted.iter().map(|(_, x)| x[k]).collect())
-                .unwrap_or(0.0)
-                .max(1.0)
-        })
-        .collect();
+    let medians: [f64; 6] = std::array::from_fn(|k| {
+        median(adjusted.iter().map(|(_, x)| x[k]).collect())
+            .unwrap_or(0.0)
+            .max(1.0)
+    });
     adjusted
         .iter()
         .map(|(user, x)| {
@@ -83,6 +85,8 @@ pub fn score(inputs: &[Input], period_days: u32, cfg: &ScoreConfig) -> Vec<Score
                 user: user.to_string(),
                 parts,
                 total: parts.iter().sum(),
+                ratios: std::array::from_fn(|k| x[k] / medians[k]),
+                medians,
             }
         })
         .collect()
@@ -122,6 +126,9 @@ mod tests {
         assert!((s[1].total - 50.0).abs() < 1e-9, "{s:?}");
         assert!((s[2].total - 100.0).abs() < 1e-9);
         assert!((s[0].total - 25.0).abs() < 1e-9);
+        // Ratios are uncapped; the median of 2, 4, 100 is 4.
+        assert_eq!(s[2].ratios[0], 25.0);
+        assert_eq!(s[0].medians, [4.0; 6]);
     }
 
     #[test]
