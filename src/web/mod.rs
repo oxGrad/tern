@@ -482,6 +482,306 @@ async fn asset(Path(path): Path<String>) -> Response {
 mod tests {
     use super::*;
 
+    /// Two repos, five members (one left the team, one opted out, one bot) and
+    /// a handful of PRs across 2026-10-01..16.
+    const FIXTURE: &str = "
+        INSERT INTO members (github_user, name, in_score, is_bot, in_toml, in_team) VALUES
+            ('budi', 'Budi', 1, 0, 1, 1), ('sari', 'Sari', 1, 0, 1, 0), ('ayu', 'Ayu', 0, 0, 1, 0),
+            ('gone', 'Gone', 1, 0, 0, 0), ('dependabot[bot]', 'dependabot[bot]', 0, 1, 0, 0);
+        INSERT INTO repos (id, full_name, default_branch) VALUES (1, 'o/api', 'main'), (2, 'o/web', 'main');
+        INSERT INTO pull_requests (id, repo_id, number, author, title, state, draft, created_at,
+                                   first_review_at, merged_at, updated_at, additions, deletions) VALUES
+            (1, 1, 1, 'budi', 'Big change', 'closed', 0, '2026-10-06T02:00:00Z',
+             '2026-10-06T05:00:00Z', '2026-10-08T02:00:00Z', '2026-10-08T02:00:00Z', 100, 20),
+            (2, 2, 2, 'sari', 'Tiny, \"quoted\" fix', 'closed', 0, '2026-10-13T03:00:00Z',
+             '2026-10-13T04:00:00Z', '2026-10-14T03:00:00Z', '2026-10-14T03:00:00Z', 0, 0),
+            (3, 1, 3, 'budi', 'Waiting one', 'open', 0, '2026-10-15T01:00:00Z',
+             NULL, NULL, '2026-10-15T01:00:00Z', 5, 5),
+            (4, 1, 4, 'sari', 'Draft one', 'open', 1, '2026-10-15T01:00:00Z',
+             NULL, NULL, '2026-10-15T01:00:00Z', 5, 5),
+            (5, 1, 5, 'dependabot[bot]', 'Bump dep', 'open', 0, '2026-10-10T01:00:00Z',
+             NULL, NULL, '2026-10-10T01:00:00Z', 1, 1),
+            (6, 2, 6, 'gone', 'Old work', 'closed', 0, '2026-10-06T01:00:00Z',
+             '2026-10-06T02:00:00Z', '2026-10-07T01:00:00Z', '2026-10-07T01:00:00Z', 30, 0);
+        INSERT INTO reviews (id, repo_id, pr_number, reviewer, state, submitted_at) VALUES
+            (1, 1, 1, 'sari', 'APPROVED', '2026-10-06T05:00:00Z'),
+            (2, 2, 2, 'budi', 'CHANGES_REQUESTED', '2026-10-13T04:00:00Z');
+        INSERT INTO comments (id, repo_id, pr_number, author, kind, body_len, created_at) VALUES
+            (1, 1, 1, 'sari', 'review', 10, '2026-10-06T05:00:00Z'),
+            (2, 2, 2, 'budi', 'conversation', 5, '2026-10-13T06:00:00Z'),
+            (3, 1, 1, 'ayu', 'conversation', 3, '2026-10-07T03:00:00Z');
+        INSERT INTO commits (sha, repo_id, author_login, authored_at, committed_at, pr_number) VALUES
+            ('a', 1, 'budi', '2026-10-06T01:00:00Z', '2026-10-06T01:00:00Z', 1),
+            ('b', 2, 'sari', '2026-10-13T02:00:00Z', '2026-10-13T02:00:00Z', 2);
+        INSERT INTO away_days (github_user, date) VALUES ('sari', '2026-10-12');
+        INSERT INTO sync_runs (started_at, status, requests_used, rate_remaining)
+            VALUES ('2026-10-16T07:15:00Z', 'ok', 23, 4812);";
+
+    const Q: &str = "from=2026-10-01&to=2026-10-16";
+
+    struct Srv {
+        base: String,
+        http: reqwest::Client,
+    }
+
+    impl Srv {
+        async fn start() -> Srv {
+            let config = Config {
+                db_path: tempfile::tempdir().unwrap().keep().join("tern.db"),
+                ..Config::default()
+            };
+            let conn = crate::db::open(&config.db_path).unwrap();
+            conn.execute_batch(FIXTURE).unwrap();
+            crate::sync::rollup::rebuild_all(&conn, config.timezone).unwrap();
+            let state = AppState {
+                db: Arc::new(Mutex::new(conn)),
+                config: Arc::new(config),
+                sync: Arc::default(),
+            };
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let base = format!("http://{}", listener.local_addr().unwrap());
+            tokio::spawn(async move { axum::serve(listener, router(state)).await.unwrap() });
+            Srv {
+                base,
+                http: reqwest::Client::new(),
+            }
+        }
+
+        async fn get(&self, path: &str) -> (u16, String) {
+            let r = self
+                .http
+                .get(format!("{}{path}", self.base))
+                .send()
+                .await
+                .unwrap();
+            (r.status().as_u16(), r.text().await.unwrap())
+        }
+
+        /// A CSV export, as rows of cells (no quoting in the fixture's hot paths).
+        async fn csv(&self, path: &str) -> Vec<Vec<String>> {
+            let (status, body) = self.get(&format!("{path}&format=csv")).await;
+            assert_eq!(status, 200, "{body}");
+            body.lines()
+                .skip(1)
+                .map(|l| l.split(',').map(String::from).collect())
+                .collect()
+        }
+    }
+
+    fn col(rows: &[Vec<String>], i: usize) -> Vec<&str> {
+        rows.iter().map(|r| r[i].as_str()).collect()
+    }
+
+    #[tokio::test]
+    async fn full_pages_render_every_section() {
+        let srv = Srv::start().await;
+        let (status, body) = srv.get(&format!("/?{Q}")).await;
+        assert_eq!(status, 200);
+        for want in [
+            "Team overview",
+            "PRs merged",
+            "Median cycle time (h)",
+            "Score by member",
+            "Members",
+            "Activity over time",
+            "Activity by type",
+            "When work happens",
+            "last sync: ok - 2026-10-16 14:15, 23 requests",
+            "data-chart=",
+        ] {
+            assert!(body.contains(want), "overview lacks {want:?}");
+        }
+        // No GitHub configured: no Sync now button.
+        assert!(!body.contains("hx-post=\"/sync\""));
+
+        let (status, body) = srv.get(&format!("/prs?{Q}")).await;
+        assert_eq!(status, 200);
+        assert!(body.contains("Size vs cycle time") && body.contains("Waiting for review"));
+
+        let (status, body) = srv.get(&format!("/members/budi?{Q}")).await;
+        assert_eq!(status, 200);
+        for want in [
+            "Budi (budi)",
+            "Score trend",
+            "Activity mix",
+            "Personal heatmap",
+            "Big change",
+            "changes_requested",
+        ] {
+            assert!(body.contains(want), "member page lacks {want:?}");
+        }
+
+        let (status, body) = srv.get(&format!("/members/budi?{Q}&section=trend")).await;
+        assert_eq!(status, 200);
+        assert!(body.starts_with("<section id=\"trend\"") && !body.contains("<html"));
+        assert_eq!(
+            srv.get(&format!("/members/budi?{Q}&section=nope")).await.0,
+            404
+        );
+        assert_eq!(srv.get("/members/nobody").await.0, 404);
+        // Out-of-range dates fall back to the default range instead of panicking.
+        assert_eq!(srv.get("/?from=garbage&to=%2B262143-12-31").await.0, 200);
+    }
+
+    #[tokio::test]
+    async fn member_table_scores_sorts_filters_and_exports() {
+        let srv = Srv::start().await;
+        let rows = srv.csv(&format!("/fragments/member-table?{Q}")).await;
+        // Bots are hidden by default; names sort case-insensitively.
+        assert_eq!(col(&rows, 0), ["ayu", "budi", "gone", "sari"]);
+        let score = |u: &str| rows.iter().find(|r| r[0] == u).unwrap()[10].clone();
+        assert_eq!(score("ayu"), "not scored");
+        assert_eq!(score("gone"), "left team");
+        assert!(score("budi").parse::<f64>().is_ok() && score("sari").parse::<f64>().is_ok());
+        // sari was away one weekday out of twelve.
+        let days = |u: &str| rows.iter().find(|r| r[0] == u).unwrap()[9].clone();
+        assert_eq!((days("budi"), days("sari")), ("12".into(), "11".into()));
+
+        let sorted = srv
+            .csv(&format!("/fragments/member-table?{Q}&sort=0&dir=desc"))
+            .await;
+        assert_eq!(col(&sorted, 0), ["sari", "gone", "budi", "ayu"]);
+        let filtered = srv
+            .csv(&format!("/fragments/member-table?{Q}&filter=budi"))
+            .await;
+        assert_eq!(col(&filtered, 0), ["budi"]);
+        let bots = srv
+            .csv(&format!("/fragments/member-table?{Q}&bots=1"))
+            .await;
+        assert!(col(&bots, 0).contains(&"dependabot[bot]"));
+
+        let (status, html) = srv
+            .get(&format!(
+                "/fragments/member-table?{Q}&filter=budi&sort=2&dir=asc"
+            ))
+            .await;
+        assert_eq!(status, 200);
+        assert!(html.contains("filtered: budi") && html.contains("class=\"sort asc\""));
+    }
+
+    #[tokio::test]
+    async fn fragments_render_and_follow_their_params() {
+        let srv = Srv::start().await;
+        for frag in ["score", "activity", "mix", "heatmap", "prs"] {
+            let (status, body) = srv.get(&format!("/fragments/{frag}?{Q}")).await;
+            assert_eq!(status, 200, "{frag}");
+            assert!(body.starts_with("<section"), "{frag}");
+        }
+        assert_eq!(srv.get(&format!("/fragments/nope?{Q}")).await.0, 404);
+        // The score chart has no table to export.
+        assert_eq!(
+            srv.get(&format!("/fragments/score?{Q}&format=csv")).await.0,
+            404
+        );
+
+        let (_, body) = srv
+            .get(&format!("/fragments/activity?{Q}&type=reviews"))
+            .await;
+        assert!(body.contains("aria-pressed=\"true\">Reviews<"), "{body}");
+        let (_, body) = srv.get(&format!("/fragments/activity?{Q}&limit=2")).await;
+        assert!(body.contains("Load more"));
+
+        // Heatmap rows are weekday/hour cells; commits are left out.
+        let cells = srv.csv(&format!("/fragments/heatmap?{Q}")).await;
+        let total: i64 = cells.iter().map(|r| r[2].parse::<i64>().unwrap()).sum();
+        // 5 PRs opened, 3 merged, 2 reviews, 3 comments; the bot's PR is hidden.
+        assert_eq!(total, 13, "{cells:?}");
+        let tue = srv.csv(&format!("/fragments/heatmap?{Q}&filter=Tue")).await;
+        assert!(!tue.is_empty() && tue.iter().all(|r| r[0] == "Tue"));
+
+        let mix = srv.csv(&format!("/fragments/mix?{Q}")).await;
+        assert!(mix.iter().any(|r| r[0] == "budi" && r[2] == "Commits"));
+    }
+
+    #[tokio::test]
+    async fn pr_flow_lists_respect_repo_bots_and_drafts() {
+        let srv = Srv::start().await;
+        let waiting = srv
+            .csv(&format!("/fragments/prs?{Q}&state=open&reviewed=false"))
+            .await;
+        // Not the draft, not the bot's.
+        assert_eq!(col(&waiting, 2), ["#3"]);
+        let with_bots = srv
+            .csv(&format!(
+                "/fragments/prs?{Q}&state=open&reviewed=false&bots=1"
+            ))
+            .await;
+        assert_eq!(col(&with_bots, 2), ["#5", "#3"]);
+
+        let merged = srv.csv(&format!("/fragments/prs?{Q}&state=merged")).await;
+        assert_eq!(col(&merged, 1), ["#2", "#1", "#6"]);
+        let web = srv
+            .csv(&format!("/fragments/prs?{Q}&state=merged&repo=o%2Fweb"))
+            .await;
+        assert_eq!(col(&web, 1), ["#2", "#6"]);
+        let unknown = srv
+            .csv(&format!("/fragments/prs?{Q}&state=merged&repo=o%2Fnope"))
+            .await;
+        assert!(unknown.is_empty());
+
+        let (_, raw) = srv
+            .get(&format!("/fragments/prs?{Q}&state=merged&format=csv"))
+            .await;
+        assert!(
+            raw.contains("\"Tiny, \"\"quoted\"\" fix\""),
+            "CSV must quote: {raw}"
+        );
+    }
+
+    #[tokio::test]
+    async fn assets_and_the_request_guard() {
+        let srv = Srv::start().await;
+        let r = srv
+            .http
+            .get(format!("{}/static/charts.js", srv.base))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.status(), 200);
+        assert_eq!(r.headers()[header::CONTENT_TYPE], "text/javascript");
+        let r = srv
+            .http
+            .get(format!("{}/static/style.css", srv.base))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(r.headers()[header::CONTENT_TYPE], "text/css");
+        assert_eq!(srv.get("/static/nope.js").await.0, 404);
+
+        let rebound = srv
+            .http
+            .get(format!("{}/", srv.base))
+            .header(header::HOST, "evil.example:8088")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(rebound.status(), 403);
+
+        let sync = |hx: bool, origin: &str| {
+            let mut req = srv
+                .http
+                .post(format!("{}/sync", srv.base))
+                .header(header::ORIGIN, origin);
+            if hx {
+                req = req.header("HX-Request", "true");
+            }
+            req.send()
+        };
+        assert_eq!(sync(false, &srv.base).await.unwrap().status(), 403);
+        assert_eq!(
+            sync(true, "http://evil.example").await.unwrap().status(),
+            403
+        );
+        let ok = sync(true, &srv.base).await.unwrap();
+        assert_eq!(ok.status(), 200);
+        assert!(
+            ok.text()
+                .await
+                .unwrap()
+                .starts_with("sync failed - [github] is not configured")
+        );
+    }
+
     #[test]
     fn only_local_host_names_pass() {
         for ok in [

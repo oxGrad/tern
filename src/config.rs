@@ -12,6 +12,7 @@ const DB_PATH_OVERRIDE_ENV: &str = "TERN_DB_PATH";
 
 const DEFAULT_TIMEZONE: &str = "Asia/Jakarta";
 const DEFAULT_DB_FILE_NAME: &str = "tern.db";
+const DEFAULT_API_URL: &str = "https://api.github.com";
 const DEFAULT_SYNC_INTERVAL_MINUTES: u32 = 15;
 const DEFAULT_LISTEN: &str = "127.0.0.1:8088";
 const DEFAULT_CAP_MULTIPLE: f64 = 2.0;
@@ -37,6 +38,8 @@ pub struct GithubConfig {
     /// Empty = every non-archived repo the App can see.
     pub repos: Vec<String>,
     pub sync_interval_minutes: u32,
+    /// REST API root: api.github.com, or `https://<host>/api/v3` for GitHub Enterprise.
+    pub api_url: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -105,6 +108,7 @@ struct RawGithub {
     team: Option<String>,
     repos: Option<Vec<String>>,
     sync_interval_minutes: Option<u32>,
+    api_url: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -145,6 +149,11 @@ fn github_from_raw(raw: RawGithub) -> Result<Option<GithubConfig>> {
         team,
         repos: raw.repos.unwrap_or_default(),
         sync_interval_minutes,
+        api_url: raw
+            .api_url
+            .unwrap_or_else(|| DEFAULT_API_URL.into())
+            .trim_end_matches('/')
+            .to_string(),
     }))
 }
 

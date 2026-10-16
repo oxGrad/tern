@@ -16,9 +16,10 @@ jobs:
     steps:
       - uses: oxHive/pipelines/.github/actions/rust-check@v2
         with:
-          # the sync worker and web layer need a live GitHub App and a browser,
-          # so the pure core (score, rollup, parsing, DB) carries the coverage.
-          fail-under-coverage: 30
+          # The sync runs against a mock GitHub (src/mock_github.rs) and the
+          # web tests drive the real router, so only main.rs's CLI wiring is
+          # untested. Same gate as publish.yml.
+          fail-under-coverage: 70
 
   audit:
     runs-on: ubuntu-latest

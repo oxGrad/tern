@@ -14,26 +14,58 @@ jobs:
       checks: write
       packages: write
     # Same shared pipeline as oxhive/mynd: verify version -> check -> audit ->
-    # build (linux x86_64/arm64, macOS arm64) -> GitHub Release -> Homebrew.
+    # build (linux x86_64/arm64, macOS arm64) -> GitHub Release.
     uses: oxHive/pipelines/.github/workflows/rust-release.yml@v2
     with:
       package-name: tern
       binary-name: tern
-      # Matches pull-request.yml; the pipeline's default is 60.
-      fail-under-coverage: "30"
-      publish-homebrew: true
-      # oxhive/homebrew-tap, like mynd. Not oxGrad/homebrew-tap: the shared
-      # action writes into Formula/, which would hide the formulae that tap
-      # keeps at its root (knot, skein, spicebag).
-      homebrew-owner: oxhive
-      homebrew-tap: homebrew-tap
-      homebrew-install: 'bin.install "tern"'
-      homebrew-test-command: 'system "#{bin}/tern", "--version"'
+      fail-under-coverage: "70"
+      # The shared Homebrew step writes into the tap's Formula/ folder, which
+      # would hide the formulae oxGrad/homebrew-tap keeps at its root (knot,
+      # skein, spicebag). The `homebrew` job below publishes there instead.
+      publish-homebrew: false
     # Only the secrets rust-release.yml declares, rather than `inherit`.
-    # HOMEBREW_TAP_TOKEN (a PAT with write access to oxhive/homebrew-tap) is
-    # the path that works from this org: the HOMEBREW_APP_* path mints a token
-    # for repos named in the oxhive org, and tern lives in oxGrad.
     secrets:
-      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
       DISCORD_ALERT_WEBHOOK_URL: ${{ secrets.DISCORD_ALERT_WEBHOOK_URL }}
+
+  homebrew:
+    needs: release
+    if: ${{ !contains(github.ref_name, '-rc') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      # The same tarballs the GitHub Release was created from (same run).
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+          pattern: tern-*
+          merge-multiple: true
+
+      - name: Write formula
+        run: .github/scripts/homebrew-formula.sh "$GITHUB_REF_NAME" "$GITHUB_REPOSITORY" artifacts > tern.rb
+
+      - uses: actions/checkout@v7
+        with:
+          repository: oxGrad/homebrew-tap
+          # Same secret name as knot/skein/spicebag: a token with write access
+          # to oxGrad/homebrew-tap.
+          token: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          path: tap
+
+      - name: Push formula
+        working-directory: tap
+        run: |
+          cp ../tern.rb tern.rb
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tern.rb
+          if git diff --cached --quiet; then
+            echo "formula unchanged"
+            exit 0
+          fi
+          git commit -m "Brew formula update for tern version $GITHUB_REF_NAME"
+          git push

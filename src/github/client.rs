@@ -12,7 +12,6 @@ use serde::Deserialize;
 
 use super::auth::{AppKey, InstallationToken};
 
-const API: &str = "https://api.github.com";
 const API_VERSION: &str = "2022-11-28";
 
 fn user_agent() -> String {
@@ -131,12 +130,15 @@ impl Step {
 
 pub struct Client {
     http: reqwest::Client,
+    /// `https://api.github.com`, or a GitHub Enterprise / test server.
+    base: String,
 }
 
 impl Client {
-    pub fn new() -> Client {
+    pub fn new(base: &str) -> Client {
         Client {
             http: http_client(Duration::from_secs(20)),
+            base: base.trim_end_matches('/').to_string(),
         }
     }
 
@@ -167,13 +169,18 @@ impl Client {
 
     pub async fn app(&self, jwt: &str) -> Result<AppInfo> {
         let body = self
-            .send(self.http.get(format!("{API}/app")), jwt, Step::App, "")
+            .send(
+                self.http.get(format!("{}/app", self.base)),
+                jwt,
+                Step::App,
+                "",
+            )
             .await?;
         parse_app(&body)
     }
 
     pub async fn org_installation(&self, jwt: &str, org: &str) -> Result<Installation> {
-        let url = format!("{API}/orgs/{org}/installation");
+        let url = format!("{}/orgs/{org}/installation", self.base);
         let body = self
             .send(self.http.get(url), jwt, Step::Installation, org)
             .await?;
@@ -186,7 +193,10 @@ impl Client {
         installation_id: u64,
         org: &str,
     ) -> Result<InstallationToken> {
-        let url = format!("{API}/app/installations/{installation_id}/access_tokens");
+        let url = format!(
+            "{}/app/installations/{installation_id}/access_tokens",
+            self.base
+        );
         let body = self
             .send(self.http.post(url), jwt, Step::Token, org)
             .await?;
@@ -194,7 +204,7 @@ impl Client {
     }
 
     pub async fn repo_count(&self, token: &str, org: &str) -> Result<u64> {
-        let url = format!("{API}/installation/repositories?per_page=1");
+        let url = format!("{}/installation/repositories?per_page=1", self.base);
         let body = self
             .send(self.http.get(url), token, Step::Repos, org)
             .await?;
@@ -205,9 +215,9 @@ impl Client {
 /// The full round-trip `tern status` reports: App JWT -> `/app` -> the org's installation -> an
 /// installation token -> how many repos it sees. Proves the key, the App
 /// ID, the org, the installation, and the Metadata permission in one go.
-pub async fn check(app_id: u64, org: &str, key: &AppKey) -> Result<AppCheck> {
+pub async fn check(base: &str, app_id: u64, org: &str, key: &AppKey) -> Result<AppCheck> {
     let started = Instant::now();
-    let client = Client::new();
+    let client = Client::new(base);
     let jwt = key.app_jwt(app_id, chrono::Utc::now().timestamp())?;
     let app = client.app(&jwt).await?;
     let installation = client.org_installation(&jwt, org).await?;
@@ -249,6 +259,7 @@ pub enum Page {
 /// installation token, counts requests, and tracks the rate-limit headroom.
 pub struct Api {
     http: reqwest::Client,
+    base: String,
     app_id: u64,
     org: String,
     key: AppKey,
@@ -259,12 +270,13 @@ pub struct Api {
 }
 
 impl Api {
-    pub async fn connect(app_id: u64, org: &str, key: AppKey) -> Result<Api> {
-        let client = Client::new();
+    pub async fn connect(base: &str, app_id: u64, org: &str, key: AppKey) -> Result<Api> {
+        let client = Client::new(base);
         let jwt = key.app_jwt(app_id, chrono::Utc::now().timestamp())?;
         let installation = client.org_installation(&jwt, org).await?;
         Ok(Api {
             http: http_client(Duration::from_secs(30)),
+            base: client.base.clone(),
             app_id,
             org: org.to_string(),
             key,
@@ -283,7 +295,7 @@ impl Api {
             return Ok(t.token.clone());
         }
         let jwt = self.key.app_jwt(self.app_id, now)?;
-        let t = Client::new()
+        let t = Client::new(&self.base)
             .installation_token(&jwt, self.installation_id, &self.org)
             .await?;
         self.token = Some(t.clone());
@@ -295,7 +307,7 @@ impl Api {
         let url = if path.starts_with("http") {
             path.to_string()
         } else {
-            format!("{API}{path}")
+            format!("{}{path}", self.base)
         };
         let token = self.token().await?;
         let mut req = self

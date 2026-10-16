@@ -22,6 +22,7 @@
 # team = "engineering"
 # repos = []                   # empty = every non-archived repo the App can see
 # sync_interval_minutes = 15
+# api_url = "https://api.github.com"   # GitHub Enterprise: https://<host>/api/v3
 
 [server]
 # listen = "127.0.0.1:8088"     # localhost only; the dashboard is never exposed

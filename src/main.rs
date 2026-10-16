@@ -24,7 +24,15 @@ pub(crate) mod test_support {
     /// Shared by every test that mutates process env vars (`TERN_*`):
     /// `cargo test` runs tests in parallel within one process.
     pub static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Takes `ENV_LOCK` even if an earlier test panicked while holding it.
+    pub fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
 }
+
+#[cfg(test)]
+mod mock_github;
 
 #[derive(Parser)]
 #[command(version = env!("TERN_VERSION"))]

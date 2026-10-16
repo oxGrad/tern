@@ -83,7 +83,7 @@ async fn run_inner(
         )
     })?;
     let key = AppKey::from_pem(&pem)?;
-    let api = api_slot.insert(Api::connect(gh.app_id, &gh.org, key).await?);
+    let api = api_slot.insert(Api::connect(&gh.api_url, gh.app_id, &gh.org, key).await?);
     let fallback = since
         .map(|d| rollup::local_midnight(d, config.timezone))
         .unwrap_or_else(|| Utc::now() - Duration::days(DEFAULT_LOOKBACK_DAYS));
@@ -316,7 +316,184 @@ fn store(c: &Connection, repo_id: i64, d: &RepoData) -> Result<Option<(String, S
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::GithubConfig;
+    use crate::mock_github;
     use fetch::{Commit, Pr, Review};
+    use std::sync::atomic::Ordering;
+
+    fn mock_config(api_url: &str) -> Config {
+        Config {
+            db_path: tempfile::tempdir().unwrap().keep().join("tern.db"),
+            github: Some(GithubConfig {
+                app_id: 1,
+                org: "o".into(),
+                team: "t".into(),
+                repos: vec![],
+                sync_interval_minutes: 15,
+                api_url: api_url.into(),
+            }),
+            ..Config::default()
+        }
+    }
+
+    fn roster(config: &Config) -> Mutex<Connection> {
+        let c = crate::db::open(&config.db_path).unwrap();
+        c.execute_batch(
+            "INSERT INTO members (github_user, name, in_toml) VALUES ('budi', 'Budi', 1), ('sari', 'Sari', 1);
+             INSERT INTO member_emails (email, github_user) VALUES ('budi@personal.dev', 'budi');",
+        )
+        .unwrap();
+        Mutex::new(c)
+    }
+
+    fn strings(c: &Connection, sql: &str) -> Vec<String> {
+        c.prepare(sql)
+            .unwrap()
+            .query_map([], |r| r.get::<_, String>(0))
+            .unwrap()
+            .map(|r| r.unwrap())
+            .collect()
+    }
+
+    fn date(s: &str) -> NaiveDate {
+        NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)] // the env lock must span the whole sync
+    async fn first_sync_stores_everything_and_an_idle_resync_costs_only_304s() {
+        let _env = crate::test_support::env_lock();
+        // SAFETY: held under ENV_LOCK; removed before returning.
+        unsafe { std::env::set_var(crate::github::KEY_PATH_ENV, mock_github::KEY_PATH) };
+        let mock = mock_github::start().await;
+        let config = mock_config(&mock.url);
+        let db = roster(&config);
+
+        let first = run(&db, &config, Some(date("2026-10-01"))).await.unwrap();
+        assert_eq!((first.status, first.repos), ("ok", 1));
+        assert_eq!(first.remaining, Some(4999));
+        {
+            let c = db.lock().unwrap();
+            let pr: (String, String, Option<String>, i64) = c
+                .query_row(
+                    "SELECT author, first_review_at, merged_at, additions + deletions FROM pull_requests",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+                )
+                .unwrap();
+            // Logins are lowercased; the thread reply at 04:00 is the first review.
+            assert_eq!(
+                pr,
+                (
+                    "budi".into(),
+                    "2026-10-14T04:00:00Z".into(),
+                    Some("2026-10-15T10:00:00Z".into()),
+                    15
+                )
+            );
+            // Not the thread reply, the self review or the pending one.
+            assert_eq!(
+                strings(
+                    &c,
+                    "SELECT reviewer || ':' || state FROM reviews ORDER BY id"
+                ),
+                ["sari:APPROVED", "dependabot[bot]:COMMENTED"]
+            );
+            // c2's unlinked email resolves to budi; the squash merge m7 is skipped.
+            assert_eq!(
+                strings(
+                    &c,
+                    "SELECT sha || ':' || author_login || ':' || COALESCE(pr_number, '-') FROM commits ORDER BY sha"
+                ),
+                ["c1:budi:7", "c2:budi:7", "d1:sari:-"]
+            );
+            // The issue (not PR) comment is dropped.
+            assert_eq!(
+                strings(&c, "SELECT id || ':' || kind FROM comments ORDER BY id"),
+                ["11:review", "21:conversation"]
+            );
+            assert_eq!(
+                strings(
+                    &c,
+                    "SELECT github_user || ':' || is_bot || in_team FROM members ORDER BY github_user"
+                ),
+                ["budi:01", "dependabot[bot]:10", "sari:01"]
+            );
+            // The archived repo is stored but never synced.
+            assert_eq!(
+                strings(&c, "SELECT DISTINCT CAST(repo_id AS TEXT) FROM sync_state"),
+                ["1"]
+            );
+            // Rolled up in Asia/Jakarta days.
+            assert_eq!(
+                strings(
+                    &c,
+                    "SELECT github_user || ' ' || date || ' ' || commits || prs_opened || prs_merged
+                            || reviews_given || review_comments || conv_comments || ' ' || lines_changed
+                       FROM daily_member_stats ORDER BY github_user, date"
+                ),
+                [
+                    "budi 2026-10-14 210001 0",
+                    "budi 2026-10-15 001000 15",
+                    // Bots get rows too; the dashboard hides them unless asked.
+                    "dependabot[bot] 2026-10-14 000100 0",
+                    "sari 2026-10-14 000110 0",
+                    "sari 2026-10-15 100000 0",
+                ]
+            );
+            assert_eq!(strings(&c, "SELECT status FROM sync_runs"), ["ok"]);
+        }
+
+        mock.clear();
+        let second = run(&db, &config, None).await.unwrap();
+        assert_eq!(second.status, "ok");
+        // Team, repos, then four lists that all answer 304: no PR is refetched.
+        assert_eq!(second.requests, 6, "{:#?}", mock.hits());
+        assert!(!mock.hits().iter().any(|h| h.contains("/pulls/7")));
+
+        unsafe { std::env::remove_var(crate::github::KEY_PATH_ENV) };
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn rate_limit_marks_the_run_partial_and_keeps_cursors() {
+        let _env = crate::test_support::env_lock();
+        // SAFETY: held under ENV_LOCK; removed before returning.
+        unsafe { std::env::set_var(crate::github::KEY_PATH_ENV, mock_github::KEY_PATH) };
+        let mock = mock_github::start().await;
+        mock.rate_limited.store(true, Ordering::SeqCst);
+        let config = mock_config(&mock.url);
+        let db = roster(&config);
+
+        let s = run(&db, &config, Some(date("2026-10-01"))).await.unwrap();
+        assert_eq!(s.status, "partial");
+        let c = db.lock().unwrap();
+        assert!(strings(&c, "SELECT entity FROM sync_state").is_empty());
+        assert!(strings(&c, "SELECT error FROM sync_runs WHERE error IS NOT NULL").len() == 1);
+        drop(c);
+        unsafe { std::env::remove_var(crate::github::KEY_PATH_ENV) };
+    }
+
+    #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
+    async fn missing_config_or_key_fails_the_run_and_logs_why() {
+        let _env = crate::test_support::env_lock();
+        unsafe { std::env::remove_var(crate::github::KEY_PATH_ENV) };
+        let mut config = mock_config("http://127.0.0.1:9");
+        let db = roster(&config);
+        let e = run(&db, &config, None).await.unwrap_err();
+        assert!(e.to_string().contains("no App key"), "{e}");
+
+        config.github = None;
+        let e = run(&db, &config, None).await.unwrap_err();
+        assert!(e.to_string().contains("[github] is not configured"), "{e}");
+
+        let c = db.lock().unwrap();
+        assert_eq!(
+            strings(&c, "SELECT status FROM sync_runs"),
+            ["failed", "failed"]
+        );
+    }
 
     #[test]
     fn store_is_idempotent_and_keeps_pr_links() {

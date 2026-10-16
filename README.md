@@ -7,7 +7,7 @@ charts per member on `127.0.0.1:8088`. Design: `docs/Team GitHub Activity Dashbo
 ## Install
 
 ```sh
-brew install oxhive/tap/tern     # macOS arm64, Linux x86_64/arm64
+brew install oxgrad/tap/tern     # macOS arm64, Linux x86_64/arm64
 # or from source
 cargo install --path .
 ```
@@ -28,4 +28,4 @@ tern                                             # sync ticker + dashboard
 
 `just release-patch` (or `-minor`, `-major`) bumps the version, tags `v*`
 and pushes; `.github/workflows/publish.yml` builds the binaries, creates the
-GitHub Release and updates the `oxhive/tap` Homebrew formula.
+GitHub Release and updates `tern.rb` in `oxGrad/homebrew-tap`.
