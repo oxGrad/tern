@@ -13,7 +13,7 @@ install:
 run *args:
   cargo run -- {{ args }}
 
-# The four checks CI gates on (.github/workflows/ci.yml) - run before pushing
+# The four checks CI gates on (.github/workflows/pull-request.yml) - run before pushing
 check:
   cargo fmt --check
   cargo clippy --all-targets -- -D warnings

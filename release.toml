@@ -1,0 +1,15 @@
+# cargo-release configuration
+# Usage: just release-patch / release-minor / release-major
+#        (dry-run first with `cargo release <bump>` - no --execute - to preview)
+#
+# On --execute this bumps the version in Cargo.toml + Cargo.lock, commits it,
+# tags it `v{version}`, and pushes both - which fires
+# `.github/workflows/publish.yml` (GitHub Release + Homebrew formula).
+
+sign-commit = false
+sign-tag = false
+push = true
+publish = false                                # not a crates.io crate
+tag = true
+tag-name = "v{{version}}"
+pre-release-commit-message = "chore: release v{{version}}"

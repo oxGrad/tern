@@ -2,6 +2,9 @@
 name = "tern"
 version = "0.1.0"
 edition = "2024"
+description = "Team GitHub activity dashboard: syncs an org's PRs, reviews and commits into SQLite and serves charts per member"
+repository = "https://github.com/oxGrad/tern"
+license = "Apache-2.0"
 publish = false
 
 [dependencies]
