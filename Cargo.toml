@@ -9,7 +9,7 @@ publish = false
 
 [dependencies]
 anyhow = "1.0.104"
-askama = "0.14"
+askama = "0.16"
 axum = "0.8"
 base64 = "0.22"
 chrono = "0.4.45"
