@@ -11,7 +11,7 @@ publish = false
 anyhow = "1.0.104"
 askama = "0.14"
 axum = "0.8"
-base64 = "0.22"
+base64 = "0.23"
 chrono = "0.4.45"
 chrono-tz = "0.10.4"
 clap = { version = "4.6.6", features = ["derive"] }
